@@ -6,28 +6,44 @@ class BayesianOptimizer:
     def __init__(self, opt_data, real_data):
         self.opt_data = opt_data
         self.real_data = real_data
-        self.pbounds = {f'c1_{i}': (-1, 1) for i in range(len(opt_data))}
-        self.pbounds.update({f'c2_{i}': (-1, 1) for i in range(len(opt_data))})
-        self.pbounds.update({f'c3_{i}': (-1, 1) for i in range(len(opt_data))})
+        self.pbounds = {}
+        self.current_index = 0  # Add this line
+
+        for i in range(len(opt_data)):
+            self.pbounds.update({f'c1_{i}': (-0.5, 0.5), f'c2_{i}': (-0.5, 0.5), f'c3_{i}': (-1, 0)})
+        
         self.optimizer = BayesianOptimization(
             f=self.objective,
             pbounds=self.pbounds,
             random_state=1,
+            verbose=0,
         )
-
     def objective(self, **kwargs):
-        total_error = 0
-        for i in range(len(self.opt_data)):
-            ey = self.opt_data[i, 6]
-            epsi = self.opt_data[i, 7]
-            v = self.opt_data[i, 8]
-            T_opt = self.opt_data[i, 10]
-            real_dataset_index = i % len(self.real_data)
-            T_real = self.real_data[real_dataset_index][i // len(self.real_data),6]
-            model_output = kwargs[f'c1_{i}'] * ey**2 + kwargs[f'c2_{i}']* epsi**2 + kwargs[f'c3_{i}'] * v**2
-            error = (T_opt - T_real - model_output) ** 2
-            total_error += error
-        return -total_error
+        i = self.current_index
+        ey = self.opt_data[i, 6]
+        epsi = self.opt_data[i, 7]
+        v = self.opt_data[i, 8]
+        T_opt = self.opt_data[i, 10]
+        real_dataset_index = i % len(self.real_data)
+        T_real = self.real_data[real_dataset_index][i // len(self.real_data),6]
+        model_output = kwargs[f'c1_{i}'] * ey**2 + kwargs[f'c2_{i}'] * epsi**2 + kwargs[f'c3_{i}'] * v**2            
+        error = (abs(T_real - T_opt) - model_output)**2
+        self.current_index = (self.current_index +1) % len(self.opt_data)  # Add this line
+        return -error
+    # def objective(self, **kwargs):
+        
+    #     for i in range(len(self.real_data)):
+    #         ey = self.opt_data[i, 6]
+    #         epsi = self.opt_data[i, 7]
+    #         v = self.opt_data[i, 8]
+    #         T_opt = self.opt_data[i, 10]
+    #         real_dataset_index = i % len(self.opt_data)
+    #         T_real = self.real_data[real_dataset_index][i // len(self.real_data),6]
+    #         model_output = kwargs[f'c1_{i}'] * ey**2 + kwargs[f'c2_{i}'] * epsi**2 + kwargs[f'c3_{i}'] * v**2            
+    #         print(abs(T_opt - T_real))
+    #         error = (abs(T_real - T_opt) - model_output)**2
+            
+    #     return -error
     # def objective(self, **kwargs):
     #     ey = self.opt_data[:,6]
     #     epsi = self.opt_data[:,7]
@@ -42,13 +58,13 @@ class BayesianOptimizer:
 
     def optimize(self):
         self.optimizer.maximize(
-            init_points=5,
+            init_points=98,
             n_iter=10,
         )
         best_result = self.optimizer.max
-        print("Best Result:")
-        print("  Params:", best_result['params'])
-        print("  Target:", best_result['target'])
+        #print("Best Result:")
+        #print("  Params:", best_result['params'])
+        #print("  Target:", best_result['target'])
         # for i, res in enumerate(self.optimizer.res):
         #     print(f"Iteration {i}:")
         #     print("  Params:", res['params'])
@@ -78,17 +94,41 @@ class BayesianOptimizer:
         for i in range(len(ey)):
             model_output[i] = self.optimizer.max['params'][f'c1_{i}'] * ey[i]**2 + self.optimizer.max['params'][f'c2_{i}'] * epsi[i]**2 + self.optimizer.max['params'][f'c3_{i}'] * v[i]**2
         return model_output
+    def calculate_gap(self, real_data):
+        # Get the transformed data (model output)
+        model_output = self.transform_data()
 
-real_data_list = []
-for j in range(3):
+        # Select the relevant column from the real data
+        real_data_column = real_data[:, 6] -self.opt_data[:,10]  # Adjust this index if necessary
+
+        # Calculate the gap between the model output and the real data
+        gap = real_data_column - model_output
+
+        return gap
+
+# ... (the rest of your code)
+
+
     
-    real_data = np.loadtxt(f'/home/hmcl/research/ppc_track/result/optimized_traj{j}.txt', delimiter=',', dtype=float)
+real_data_list = []
+for j in range(5):
+    
+    real_data = np.loadtxt(f'/home/hmcl/research/ppc_track/result/optimized_traj/optimized_traj{j}.txt', delimiter=',', dtype=float)
     real_data_list.append(real_data) 
+    print(f"Shape of real_data {j}: {real_data.shape}")  # 각 real_data의 shape 출력
+    print(f"First few rows of real_data {j}:\n{real_data[:5]}")  # 각 real_data의 처음 5행 출력
+
 # real_data = np.loadtxt('/path/to/optimized_traj0.txt', delimiter=',', dtype=float)
 opt_data = np.loadtxt('/home/hmcl/Downloads/asd/sdomain/kennedy-main/data/optimized_traj_round1.txt', delimiter=',', dtype=float)
 #opt_data = np.loadtxt('/path/to/optimized_traj_round1.txt', delimiter=',', dtype=float)
 bayesian_optimizer = BayesianOptimizer(opt_data, real_data_list)
 best_params = bayesian_optimizer.optimize()
+
+# Calculate the gap for each real data set
+for i, real_data in enumerate(real_data_list):
+    gap = bayesian_optimizer.calculate_gap(real_data)
+    average_gap = np.mean(gap)
+    print(f"Average gap for real data set {i}: {average_gap}")
 #transformed_data = bayesian_optimizer.transform_data(best_params)
 #print("Best parameters:", best_params)
 #print("Transformed data:", transformed_data)
